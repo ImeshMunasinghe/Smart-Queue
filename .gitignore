@@ -1,0 +1,36 @@
+# Node & Web Build Artifacts
+web/node_modules/
+web/dist/
+web/dist-ssr/
+web/*.local
+
+# Java & Maven Build Artifacts
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+
+# Python Virtual Environments & Caches
+prediction/venv/
+prediction/.pytest_cache/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & Editor Directories
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs & Temporary Files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
