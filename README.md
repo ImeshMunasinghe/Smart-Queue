@@ -88,13 +88,31 @@ flowchart TB
 
 ## 🚀 Quick Start Guide
 
-### Option A: Run with Docker Compose
-```bash
-# Start all services (Postgres 16, Redis 7, Backend, Prediction service)
-docker compose up --build
-```
-- **Backend API**: `http://localhost:8080`
-- **Prediction Microservice**: `http://localhost:8000` (Swagger docs at `/docs`)
+### Option A: Run with Docker Compose (Recommended)
+
+1. **Start Backend Services**:
+   ```bash
+   # (Optional) Rebuild backend JAR if code was modified
+   cd backend && ./mvnw.cmd package -DskipTests && cd ..
+
+   # Start all 4 containers (Postgres 16, Redis 7, Backend, Prediction service)
+   docker compose up -d
+   ```
+   - **Backend API**: `http://localhost:8080`
+   - **Prediction Microservice**: `http://localhost:8000` (Swagger docs at `/docs`)
+
+2. **Start Web Frontend**:
+   ```bash
+   cd web
+   npm install
+   npm run dev
+   ```
+   - **Web Dashboard**: `http://localhost:5173`
+
+3. **Stop Services**:
+   ```bash
+   docker compose down
+   ```
 
 ---
 

@@ -463,18 +463,89 @@ public interface SmsGatewayProvider {
 | **Web Frontend** | React 19, Vite, Vanilla CSS | Citizen queue tracker, operator station, TV kiosk, admin console. |
 | **Containerization** | Docker, Docker Compose | Multi-container orchestration. |
 
-### 11.2 Docker Compose Quickstart
+### 11.2 Prerequisites
 
-Run all four services with a single command:
-```bash
-docker compose up --build
-```
-* **Backend Core**: `http://localhost:8080`
-* **Prediction Service**: `http://localhost:8000` (Swagger UI at `/docs`)
-* **Postgres Database**: `localhost:5432`
-* **Redis Store**: `localhost:6379`
+Before running the system, verify the following are available on your machine:
+1. **Docker Desktop**: Installed and running (whale icon steady green in system tray).
+2. **Node.js**: Installed (v18+ or v20+) for the React frontend.
+3. **Java 21**: Installed for compiling the Spring Boot backend JAR.
 
-### 11.3 Local Standalone Development Setup
+---
+
+### 11.3 Everyday Run Workflow (2 Terminals)
+
+The system consists of **Backend Infrastructure (Docker)** and the **Frontend Web Portal (Vite Dev Server)**.
+
+#### Terminal 1: Backend Infrastructure & Microservices
+
+1. Open your terminal in the project root: `d:\Smart Queue`
+2. *(If Java backend code was modified)*, compile the JAR:
+   ```powershell
+   cd backend
+   .\mvnw.cmd package -DskipTests
+   cd ..
+   ```
+3. Start all backend services in Docker:
+   ```powershell
+   docker compose up -d
+   ```
+   *(To follow live logs in your terminal instead of running in the background, omit `-d`: `docker compose up`)*
+
+This starts 4 synchronized services:
+* **PostgreSQL 16**: Port `5432` (database, auto-migrated by Flyway)
+* **Redis 7**: Port `6379` (cache & token session locks)
+* **Prediction Service**: Port `8000` (FastAPI wait-time & overbooking math)
+* **Spring Boot Core Backend**: Port `8080` (REST API & SSE broadcaster)
+
+#### Terminal 2: Web Frontend Portal
+
+1. In a second terminal, navigate to the `web` folder:
+   ```powershell
+   cd "d:\Smart Queue\web"
+   ```
+2. *(First time only)* Install frontend packages:
+   ```powershell
+   npm install
+   ```
+3. Start the dev server:
+   ```powershell
+   npm run dev
+   ```
+4. Open your browser at:
+   👉 **`http://localhost:5173`**
+
+---
+
+### 11.4 Service URLs & Health Checks
+
+| Interface / Service | URL | Role |
+|---|---|---|
+| **Citizen Portal** | `http://localhost:5173` | Remote token booking & live queue status tracker |
+| **Counter Desk** | `http://localhost:5173` *(Counter Desk tab)* | Operator workstation with hotkeys (<kbd>Space</kbd>, <kbd>S</kbd>, <kbd>C</kbd>) |
+| **Waiting Hall TV** | `http://localhost:5173` *(Top-right TV badge)* | Fullscreen public display for waiting area |
+| **Admin Console** | `http://localhost:5173` *(Administration tab)* | Capacity limits, overbooking risk controls, audit tables |
+| **SMS Sandbox** | `http://localhost:5173` *(SMS Gateway tab)* | Interactive test harness for SMS commands (`STATUS`, `CANCEL`) |
+| **Prediction API Docs** | `http://localhost:8000/docs` | Interactive Swagger UI for mathematical models |
+| **Backend Actuator Health** | `http://localhost:8080/actuator/health` | Spring Boot health check endpoint |
+
+---
+
+### 11.5 How to Stop the Project
+
+* **Stop Frontend**: Press <kbd>Ctrl</kbd> + <kbd>C</kbd> in Terminal 2.
+* **Stop Docker Services**: In Terminal 1 (or anywhere in `d:\Smart Queue`), run:
+  ```powershell
+  docker compose down
+  ```
+  *(Data in PostgreSQL and Redis is safely preserved in Docker volumes)*.
+* **Full Reset (Optional)**: To stop containers and wipe the database volumes for a clean slate:
+  ```powershell
+  docker compose down -v
+  ```
+
+---
+
+### 11.6 Local Standalone Development Setup (Without Docker)
 
 ```bash
 # 1. Start Core Backend (Spring Boot)
