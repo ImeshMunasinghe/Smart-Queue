@@ -7,7 +7,8 @@ export default function CitizenPortal({
   activeToken,
   setActiveToken,
   refreshOfficeData,
-  apiBase
+  apiBase,
+  backendConnected
 }) {
   const [form, setForm] = useState({
     serviceTypeId: '',
@@ -19,8 +20,12 @@ export default function CitizenPortal({
   const [errorMsg, setErrorMsg] = useState(null);
 
   useEffect(() => {
-    if (serviceTypes.length > 0 && !form.serviceTypeId) {
-      setForm(prev => ({ ...prev, serviceTypeId: serviceTypes[0].id }));
+    if (serviceTypes && serviceTypes.length > 0) {
+      // If current serviceTypeId is not in serviceTypes, set to first one
+      const exists = serviceTypes.some(st => st.id === form.serviceTypeId);
+      if (!exists) {
+        setForm(prev => ({ ...prev, serviceTypeId: serviceTypes[0].id }));
+      }
     }
   }, [serviceTypes]);
 
@@ -110,18 +115,41 @@ export default function CitizenPortal({
           <div className="form-field">
             <label className="field-label">
               <span>Service Category</span>
+              {serviceTypes && serviceTypes.length > 0 ? (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {serviceTypes.length} Available
+                </span>
+              ) : (
+                <span style={{ fontSize: '0.75rem', color: 'var(--warning, #d97706)' }}>
+                  Connecting...
+                </span>
+              )}
             </label>
             <select
               className="field-select"
               value={form.serviceTypeId}
               onChange={e => setForm({ ...form, serviceTypeId: e.target.value })}
+              disabled={!serviceTypes || serviceTypes.length === 0}
             >
-              {serviceTypes.map(st => (
-                <option key={st.id} value={st.id}>
-                  {st.name} — ~{st.defaultDurationMinutes} min duration
+              {!serviceTypes || serviceTypes.length === 0 ? (
+                <option value="" disabled>
+                  {backendConnected === false
+                    ? '⏳ Connecting to backend (port 8080)...'
+                    : '⏳ Loading service categories...'}
                 </option>
-              ))}
+              ) : (
+                serviceTypes.map(st => (
+                  <option key={st.id} value={st.id}>
+                    {st.name} — ~{st.defaultDurationMinutes} min duration
+                  </option>
+                ))
+              )}
             </select>
+            {(!serviceTypes || serviceTypes.length === 0) && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                Waiting for the queue engine on port 8080. Categories will load automatically once Docker completes booting.
+              </p>
+            )}
           </div>
 
           <div className="form-field">

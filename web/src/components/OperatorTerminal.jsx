@@ -133,12 +133,17 @@ export default function OperatorTerminal({
               setSelectedCounterId(e.target.value);
               loadCounterQueue(e.target.value);
             }}
+            disabled={!counters || counters.length === 0}
           >
-            {counters.map(c => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.status})
-              </option>
-            ))}
+            {!counters || counters.length === 0 ? (
+              <option value="" disabled>⏳ Loading service counters...</option>
+            ) : (
+              counters.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.status})
+                </option>
+              ))
+            )}
           </select>
           <span className="pill pill-serving" style={{ fontSize: '0.7rem' }}>
             ● {currentCounter?.status || 'ONLINE'}

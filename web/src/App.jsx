@@ -47,20 +47,49 @@ export default function App() {
   const [currentServingToken, setCurrentServingToken] = useState(null);
   const [upcomingQueue, setUpcomingQueue] = useState([]);
 
-  // Load Offices
+  const [backendConnected, setBackendConnected] = useState(null); // null = unknown, true = ok, false = offline
+
+  // Load Offices with auto-retry if backend is booting
   useEffect(() => {
-    fetch(`${API_BASE}/admin/offices`)
-      .then(res => res.json())
-      .then(data => {
-        setOffices(data);
-        if (data.length > 0) {
-          const defaultOfficeId = data[0].id;
-          setSelectedOfficeId(defaultOfficeId);
-          loadOfficeData(defaultOfficeId);
-        }
-      })
-      .catch(err => console.error('Error fetching offices:', err));
-  }, []);
+    let cancelled = false;
+
+    const fetchOffices = () => {
+      fetch(`${API_BASE}/admin/offices`)
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (cancelled) return;
+          if (Array.isArray(data) && data.length > 0) {
+            setOffices(data);
+            setBackendConnected(true);
+            setSelectedOfficeId(prev => {
+              const officeId = prev || data[0].id;
+              loadOfficeData(officeId);
+              return officeId;
+            });
+          }
+        })
+        .catch(err => {
+          if (cancelled) return;
+          setBackendConnected(false);
+        });
+    };
+
+    fetchOffices();
+    // Auto-retry every 3.5 seconds until backend is reachable and offices are loaded
+    const timer = setInterval(() => {
+      if (!backendConnected) {
+        fetchOffices();
+      }
+    }, 3500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [backendConnected]);
 
   const loadOfficeData = (officeId) => {
     if (!officeId) return;
@@ -147,6 +176,7 @@ export default function App() {
             setActiveToken={setActiveToken}
             refreshOfficeData={() => loadOfficeData(selectedOfficeId)}
             apiBase={API_BASE}
+            backendConnected={backendConnected}
           />
         )}
 
