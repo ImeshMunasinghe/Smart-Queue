@@ -5,6 +5,7 @@ import OperatorTerminal from './components/OperatorTerminal';
 import PublicDisplayBoard from './components/PublicDisplayBoard';
 import AdminConsole from './components/AdminConsole';
 import SmsSandbox from './components/SmsSandbox';
+import LoginModal from './components/LoginModal';
 
 const API_BASE = '/api/v1';
 
@@ -31,6 +32,14 @@ function playChime() {
 export default function App() {
   const [activeRole, setActiveRole] = useState('citizen'); // 'citizen' | 'operator' | 'admin' | 'sms' | 'display'
 
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [authToken,   setAuthToken]   = useState(() => sessionStorage.getItem('sq_token') || null);
+  const [authUsername, setAuthUsername] = useState(() => sessionStorage.getItem('sq_username') || null);
+  const [authRole,    setAuthRole]    = useState(() => sessionStorage.getItem('sq_role') || null);
+
+  // Which tab is pending login (null = no modal open)
+  const [pendingRole, setPendingRole] = useState(null);
+
   // Master Office & Counter Data
   const [offices, setOffices] = useState([]);
   const [selectedOfficeId, setSelectedOfficeId] = useState('');
@@ -47,9 +56,62 @@ export default function App() {
   const [currentServingToken, setCurrentServingToken] = useState(null);
   const [upcomingQueue, setUpcomingQueue] = useState([]);
 
-  const [backendConnected, setBackendConnected] = useState(null); // null = unknown, true = ok, false = offline
+  const [backendConnected, setBackendConnected] = useState(null);
 
-  // Load Offices with auto-retry if backend is booting
+  // ── Auth helpers ─────────────────────────────────────────────────────────────
+  const handleLoginSuccess = ({ token, username, role }) => {
+    sessionStorage.setItem('sq_token', token);
+    sessionStorage.setItem('sq_username', username);
+    sessionStorage.setItem('sq_role', role);
+    setAuthToken(token);
+    setAuthUsername(username);
+    setAuthRole(role);
+    // Reload office data with the new token so admin/slots/analytics fetch correctly
+    if (selectedOfficeId) loadOfficeData(selectedOfficeId, token);
+    // Navigate to the tab that triggered the login
+    if (pendingRole) setActiveRole(pendingRole);
+    setPendingRole(null);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('sq_token');
+    sessionStorage.removeItem('sq_username');
+    sessionStorage.removeItem('sq_role');
+    setAuthToken(null);
+    setAuthUsername(null);
+    setAuthRole(null);
+    setActiveRole('citizen');
+  };
+
+  /**
+   * Returns an Authorization header object when a token is present.
+   * Used for all protected API fetches.
+   */
+  const authHeaders = () =>
+    authToken ? { Authorization: `Bearer ${authToken}` } : {};
+
+  /**
+   * Intercepts tab changes for protected roles.
+   * If the user is not authenticated (or has wrong role), show the login modal.
+   */
+  const handleRoleChange = (role) => {
+    if (role === 'operator') {
+      const hasOperatorOrAdmin = authRole === 'ROLE_OPERATOR' || authRole === 'ROLE_ADMIN';
+      if (!authToken || !hasOperatorOrAdmin) {
+        setPendingRole('operator');
+        return;
+      }
+    }
+    if (role === 'admin') {
+      if (!authToken || authRole !== 'ROLE_ADMIN') {
+        setPendingRole('admin');
+        return;
+      }
+    }
+    setActiveRole(role);
+  };
+
+  // ── Load Offices with auto-retry if backend is booting ─────────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -71,18 +133,15 @@ export default function App() {
             });
           }
         })
-        .catch(err => {
+        .catch(() => {
           if (cancelled) return;
           setBackendConnected(false);
         });
     };
 
     fetchOffices();
-    // Auto-retry every 3.5 seconds until backend is reachable and offices are loaded
     const timer = setInterval(() => {
-      if (!backendConnected) {
-        fetchOffices();
-      }
+      if (!backendConnected) fetchOffices();
     }, 3500);
 
     return () => {
@@ -91,9 +150,12 @@ export default function App() {
     };
   }, [backendConnected]);
 
-  const loadOfficeData = (officeId) => {
+  const loadOfficeData = (officeId, token) => {
     if (!officeId) return;
+    // Use passed token OR fall back to current state (for scheduled refresh calls)
+    const hdrs = (token || authToken) ? { Authorization: `Bearer ${token || authToken}` } : {};
 
+    // Public endpoints — no auth needed
     fetch(`${API_BASE}/admin/offices/${officeId}/service-types`)
       .then(res => res.json())
       .then(setServiceTypes)
@@ -110,26 +172,27 @@ export default function App() {
       })
       .catch(() => setCounters([]));
 
-    fetch(`${API_BASE}/admin/offices/${officeId}/slots`)
-      .then(res => res.json())
+    // Admin-protected endpoints — require ROLE_ADMIN token
+    fetch(`${API_BASE}/admin/offices/${officeId}/slots`, { headers: hdrs })
+      .then(res => res.ok ? res.json() : [])
       .then(setSlots)
       .catch(() => setSlots([]));
 
-    fetch(`${API_BASE}/admin/offices/${officeId}/analytics`)
-      .then(res => res.json())
+    fetch(`${API_BASE}/admin/offices/${officeId}/analytics`, { headers: hdrs })
+      .then(res => res.ok ? res.json() : null)
       .then(setAnalytics)
       .catch(() => setAnalytics(null));
   };
 
   const loadCounterQueue = (counterId) => {
     if (!counterId) return;
-    fetch(`${API_BASE}/operator/counters/${counterId}/queue`)
-      .then(res => res.json())
-      .then(setUpcomingQueue)
+    fetch(`${API_BASE}/operator/counters/${counterId}/queue`, { headers: authHeaders() })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setUpcomingQueue(Array.isArray(data) ? data : []))
       .catch(() => setUpcomingQueue([]));
   };
 
-  // Real-time SSE Stream for Active Citizen Token
+  // ── Real-time SSE Stream for Active Citizen Token ──────────────────────────
   useEffect(() => {
     if (!activeToken?.id) return;
     const sse = new EventSource(`${API_BASE}/tokens/${activeToken.id}/stream`);
@@ -149,7 +212,19 @@ export default function App() {
     return () => sse.close();
   }, [activeToken?.id]);
 
-  // Full-Screen TV Waiting Hall Display Mode
+  // ── Auto-refresh admin/operator data every 15 seconds while logged in ───────
+  useEffect(() => {
+    if (!authToken || !selectedOfficeId) return;
+    const interval = setInterval(() => {
+      loadOfficeData(selectedOfficeId);
+      if (selectedCounterId) loadCounterQueue(selectedCounterId);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [authToken, selectedOfficeId, selectedCounterId]);
+
+
+
+  // ── Full-Screen TV Waiting Hall Display Mode ───────────────────────────────
   if (activeRole === 'display') {
     return (
       <PublicDisplayBoard
@@ -165,7 +240,23 @@ export default function App() {
 
   return (
     <div>
-      <Navbar activeRole={activeRole} setActiveRole={setActiveRole} />
+      {/* Login modal (shown when accessing protected tab without token) */}
+      {pendingRole && (
+        <LoginModal
+          targetRole={pendingRole}
+          onSuccess={handleLoginSuccess}
+          onClose={() => setPendingRole(null)}
+          apiBase={API_BASE}
+        />
+      )}
+
+      <Navbar
+        activeRole={activeRole}
+        setActiveRole={handleRoleChange}
+        authUsername={authUsername}
+        authRole={authRole}
+        onLogout={handleLogout}
+      />
 
       <main className="page-container">
         {activeRole === 'citizen' && (
@@ -192,6 +283,7 @@ export default function App() {
             refreshOfficeData={() => loadOfficeData(selectedOfficeId)}
             apiBase={API_BASE}
             playChime={playChime}
+            authToken={authToken}
           />
         )}
 
@@ -204,6 +296,7 @@ export default function App() {
             selectedOfficeId={selectedOfficeId}
             refreshOfficeData={() => loadOfficeData(selectedOfficeId)}
             apiBase={API_BASE}
+            authToken={authToken}
           />
         )}
 

@@ -23,13 +23,16 @@ public class OperatorController {
     private final TokenService tokenService;
     private final CounterRepository counterRepository;
     private final TokenRepository tokenRepository;
+    private final com.smartqueue.service.LoadBalancerService loadBalancerService;
 
     public OperatorController(TokenService tokenService,
                               CounterRepository counterRepository,
-                              TokenRepository tokenRepository) {
+                              TokenRepository tokenRepository,
+                              com.smartqueue.service.LoadBalancerService loadBalancerService) {
         this.tokenService = tokenService;
         this.counterRepository = counterRepository;
         this.tokenRepository = tokenRepository;
+        this.loadBalancerService = loadBalancerService;
     }
 
     @GetMapping("/counters/{counterId}")
@@ -114,7 +117,25 @@ public class OperatorController {
 
     @GetMapping("/counters/{counterId}/queue")
     public ResponseEntity<List<Token>> getUpcomingQueue(@PathVariable UUID counterId) {
-        List<Token> queue = tokenRepository.findByAssignedCounterIdAndState(counterId, TokenState.WAITING);
+        Counter counter = counterRepository.findById(counterId).orElse(null);
+        if (counter == null) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        List<Token> queue = tokenRepository.findByOfficeIdAndState(counter.getOfficeId(), TokenState.WAITING)
+                .stream()
+                .filter(t -> counterId.equals(t.getAssignedCounterId())
+                        || (t.getAssignedCounterId() == null && loadBalancerService.isEligible(counter, t.getServiceTypeId())))
+                .sorted((a, b) -> {
+                    boolean aAssigned = counterId.equals(a.getAssignedCounterId());
+                    boolean bAssigned = counterId.equals(b.getAssignedCounterId());
+                    if (aAssigned != bAssigned) return aAssigned ? -1 : 1;
+                    int prio = Integer.compare(b.getPriority(), a.getPriority());
+                    if (prio != 0) return prio;
+                    return a.getCreatedAt().compareTo(b.getCreatedAt());
+                })
+                .toList();
+
         return ResponseEntity.ok(queue);
     }
 }

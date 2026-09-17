@@ -38,9 +38,10 @@ public class LoadBalancerService {
      * FR-2.1 & FR-2.2: Finds the eligible online counter with the lowest Estimated Completion Time (ECT).
      */
     public Optional<CounterAssignmentResult> findOptimalCounter(UUID officeId, UUID serviceTypeId, int defaultDurationSeconds) {
-        List<Counter> onlineCounters = counterRepository.findByOfficeIdAndStatus(officeId, CounterStatus.ONLINE);
+        List<Counter> activeCounters = counterRepository.findByOfficeIdAndStatusIn(
+                officeId, List.of(CounterStatus.ONLINE, CounterStatus.BUSY));
 
-        List<Counter> eligibleCounters = onlineCounters.stream()
+        List<Counter> eligibleCounters = activeCounters.stream()
                 .filter(counter -> isEligible(counter, serviceTypeId))
                 .toList();
 
@@ -89,7 +90,7 @@ public class LoadBalancerService {
         return totalSeconds;
     }
 
-    private boolean isEligible(Counter counter, UUID serviceTypeId) {
+    public boolean isEligible(Counter counter, UUID serviceTypeId) {
         try {
             List<String> eligibleIds = objectMapper.readValue(
                     counter.getEligibleServiceTypesJson(),

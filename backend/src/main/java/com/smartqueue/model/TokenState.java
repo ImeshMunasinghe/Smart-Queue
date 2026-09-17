@@ -19,7 +19,7 @@ public enum TokenState {
             case WAITING -> target == CALLED || target == CANCELLED;
             case CALLED -> target == SERVING || target == NO_SHOW || target == SKIPPED || target == CANCELLED;
             case SKIPPED -> target == CALLED || target == CANCELLED;
-            case SERVING -> target == COMPLETED;
+            case SERVING -> target == COMPLETED || target == NO_SHOW || target == SKIPPED || target == CANCELLED;
             case COMPLETED, NO_SHOW, CANCELLED -> false;
         };
     }

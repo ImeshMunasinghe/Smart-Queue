@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TicketIcon, ClockIcon, MonitorIcon } from './Icons';
+import AnalyticsCharts from './AnalyticsCharts';
 
 export default function AdminConsole({
   slots,
@@ -8,7 +9,8 @@ export default function AdminConsole({
   counters,
   selectedOfficeId,
   refreshOfficeData,
-  apiBase
+  apiBase,
+  authToken
 }) {
   const [overrideInput, setOverrideInput] = useState({});
   const [savingId, setSavingId] = useState(null);
@@ -24,12 +26,17 @@ export default function AdminConsole({
     try {
       const res = await fetch(`${apiBase}/admin/slots/${slotId}/override`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({ manualOverrideLimit: val })
       });
       if (res.ok) {
         alert('Capacity override limit updated.');
         refreshOfficeData();
+      } else if (res.status === 401 || res.status === 403) {
+        alert('Session expired or insufficient permissions. Please log in again.');
       }
     } catch (err) {
       alert('Failed to update capacity: ' + err.message);
@@ -82,7 +89,7 @@ export default function AdminConsole({
             </div>
           </div>
           <div style={{ fontSize: '2.25rem', fontFamily: 'var(--font-display)', fontWeight: 800, color: 'var(--success)', marginTop: '0.2rem' }}>
-            {counters.filter(c => c.status === 'ONLINE').length} / {counters.length}
+            {counters.filter(c => c.status === 'ONLINE' || c.status === 'BUSY').length} / {counters.length}
           </div>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Active workstations serving citizens</span>
         </div>
@@ -92,7 +99,7 @@ export default function AdminConsole({
       <div className="civic-card">
         <div style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.85rem', marginBottom: '1rem' }}>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-main)', fontFamily: 'var(--font-display)' }}>
-            Session Slot Capacities & Binomial Overbooking Bounds
+            Session Slot Capacities &amp; Binomial Overbooking Bounds
           </h3>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             Issuance limits are computed dynamically using predicted no-show probabilities to prevent overflow (Risk ≤ 10%).
@@ -162,6 +169,14 @@ export default function AdminConsole({
           </table>
         </div>
       </div>
+
+      {/* 3. Historical Analytics Charts */}
+      <AnalyticsCharts
+        selectedOfficeId={selectedOfficeId}
+        serviceTypes={serviceTypes}
+        apiBase={apiBase}
+        authToken={authToken}
+      />
     </div>
   );
 }

@@ -20,7 +20,8 @@ export default function OperatorTerminal({
   loadCounterQueue,
   refreshOfficeData,
   apiBase,
-  playChime
+  playChime,
+  authToken
 }) {
   const [loading, setLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -38,21 +39,29 @@ export default function OperatorTerminal({
     return () => clearInterval(interval);
   }, [currentServingToken?.state]);
 
+  const authHeaders = () => authToken ? { Authorization: `Bearer ${authToken}` } : {};
+
   const handleCallNext = async () => {
     if (!selectedCounterId) return;
     setLoading(true);
     try {
       const res = await fetch(`${apiBase}/operator/counters/${selectedCounterId}/call-next`, {
-        method: 'POST'
+        method: 'POST',
+        headers: authHeaders()
       });
       if (res.status === 204) {
         alert('Eligible queue is clear. No waiting citizens.');
+      } else if (res.status === 401 || res.status === 403) {
+        alert('Session expired or insufficient permissions. Please log out and log in again.');
       } else if (res.ok) {
         const token = await res.json();
         setCurrentServingToken(token);
         playChime();
         loadCounterQueue(selectedCounterId);
         refreshOfficeData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert('Error calling next: ' + (err.message || res.status));
       }
     } finally {
       setLoading(false);
@@ -64,9 +73,12 @@ export default function OperatorTerminal({
     setLoading(true);
     try {
       const res = await fetch(`${apiBase}/operator/tokens/${currentServingToken.id}/${actionPath}`, {
-        method: 'POST'
+        method: 'POST',
+        headers: authHeaders()
       });
-      if (res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        alert('Session expired or insufficient permissions. Please log out and log in again.');
+      } else if (res.ok) {
         const updated = await res.json();
         if (['complete', 'no-show', 'skip'].includes(actionPath)) {
           setCurrentServingToken(null);
@@ -75,6 +87,9 @@ export default function OperatorTerminal({
         }
         loadCounterQueue(selectedCounterId);
         refreshOfficeData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert('Error performing action: ' + (err.message || res.status));
       }
     } finally {
       setLoading(false);
@@ -109,7 +124,8 @@ export default function OperatorTerminal({
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedCounterId, currentServingToken]);
+  }, [selectedCounterId, currentServingToken, authToken]);
+
 
   const formatTimer = (sec) => {
     const mins = Math.floor(sec / 60);
@@ -265,12 +281,12 @@ export default function OperatorTerminal({
               Waiting Citizens for this Service
             </h3>
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              {upcomingQueue.length} in queue
+              {(upcomingQueue || []).length} in queue
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '420px', overflowY: 'auto' }}>
-            {upcomingQueue.length > 0 ? (
+            {Array.isArray(upcomingQueue) && upcomingQueue.length > 0 ? (
               upcomingQueue.map((item, idx) => (
                 <div
                   key={item.id}

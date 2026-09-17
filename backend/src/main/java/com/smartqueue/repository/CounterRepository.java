@@ -13,5 +13,6 @@ import java.util.UUID;
 public interface CounterRepository extends JpaRepository<Counter, UUID> {
     List<Counter> findByOfficeId(UUID officeId);
     List<Counter> findByOfficeIdAndStatus(UUID officeId, CounterStatus status);
+    List<Counter> findByOfficeIdAndStatusIn(UUID officeId, List<CounterStatus> statuses);
     Optional<Counter> findByOfficeIdAndCounterNumber(UUID officeId, String counterNumber);
 }

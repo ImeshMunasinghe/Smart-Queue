@@ -163,18 +163,28 @@ public class TokenService {
                 token.setCalledAt(now);
                 // Dispatch lead SMS alert when citizen is called
                 notifyCitizenTurnApproaching(token);
+                updateCounterForToken(token.getAssignedCounterId(), token.getId(), operatorId, CounterStatus.BUSY);
             }
-            case SERVING -> token.setServedAt(now);
+            case SERVING -> {
+                token.setServedAt(now);
+                updateCounterForToken(token.getAssignedCounterId(), token.getId(), operatorId, CounterStatus.BUSY);
+            }
             case COMPLETED -> {
                 token.setCompletedAt(now);
                 recordServiceTime(token, operatorId);
                 slotCapacityRepository.decrementActiveWaitingCount(token.getSlotId());
+                freeCounter(token.getAssignedCounterId(), token.getId());
             }
             case CANCELLED -> {
                 token.setCancelledAt(now);
                 slotCapacityRepository.decrementActiveWaitingCount(token.getSlotId());
+                freeCounter(token.getAssignedCounterId(), token.getId());
             }
-            case NO_SHOW -> slotCapacityRepository.decrementActiveWaitingCount(token.getSlotId());
+            case NO_SHOW -> {
+                slotCapacityRepository.decrementActiveWaitingCount(token.getSlotId());
+                freeCounter(token.getAssignedCounterId(), token.getId());
+            }
+            case SKIPPED -> freeCounter(token.getAssignedCounterId(), token.getId());
             default -> {}
         }
 
@@ -206,7 +216,19 @@ public class TokenService {
         Counter counter = counterRepository.findById(counterId)
                 .orElseThrow(() -> new IllegalArgumentException("Counter not found: " + counterId));
 
-        List<Token> candidates = tokenRepository.findByOfficeIdAndState(counter.getOfficeId(), TokenState.WAITING);
+        List<Token> candidates = tokenRepository.findByOfficeIdAndState(counter.getOfficeId(), TokenState.WAITING)
+                .stream()
+                .filter(t -> loadBalancerService.isEligible(counter, t.getServiceTypeId()))
+                .sorted((a, b) -> {
+                    boolean aAssigned = counterId.equals(a.getAssignedCounterId());
+                    boolean bAssigned = counterId.equals(b.getAssignedCounterId());
+                    if (aAssigned != bAssigned) return aAssigned ? -1 : 1;
+                    int prio = Integer.compare(b.getPriority(), a.getPriority());
+                    if (prio != 0) return prio;
+                    return a.getCreatedAt().compareTo(b.getCreatedAt());
+                })
+                .toList();
+
         if (candidates.isEmpty()) {
             return Optional.empty();
         }
@@ -225,6 +247,29 @@ public class TokenService {
         counterRepository.save(counter);
 
         return Optional.of(response);
+    }
+
+    private void freeCounter(UUID counterId, UUID tokenId) {
+        if (counterId == null) return;
+        counterRepository.findById(counterId).ifPresent(c -> {
+            if (tokenId == null || tokenId.equals(c.getCurrentTokenId())) {
+                c.setCurrentTokenId(null);
+                c.setStatus(CounterStatus.ONLINE);
+                counterRepository.save(c);
+            }
+        });
+    }
+
+    private void updateCounterForToken(UUID counterId, UUID tokenId, UUID operatorId, CounterStatus status) {
+        if (counterId == null) return;
+        counterRepository.findById(counterId).ifPresent(c -> {
+            c.setCurrentTokenId(tokenId);
+            if (operatorId != null) {
+                c.setCurrentOperatorId(operatorId);
+            }
+            c.setStatus(status);
+            counterRepository.save(c);
+        });
     }
 
     /**
