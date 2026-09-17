@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -88,6 +89,38 @@ public interface TokenRepository extends JpaRepository<Token, UUID> {
             @Param("createdAt") OffsetDateTime createdAt);
 
     List<Token> findByAssignedCounterIdAndState(UUID counterId, TokenState state);
-    
+
     List<Token> findByOfficeIdAndState(UUID officeId, TokenState state);
+
+    /**
+     * Analytics: Daily token issuance count per service type for a date range.
+     * Returns Object[] rows: [date (LocalDate), serviceTypeId (UUID), count (Long)]
+     */
+    @Query("""
+        SELECT CAST(t.createdAt AS LocalDate), t.serviceTypeId, COUNT(t)
+        FROM Token t
+        WHERE t.officeId = :officeId
+          AND t.createdAt >= :from
+        GROUP BY CAST(t.createdAt AS LocalDate), t.serviceTypeId
+        ORDER BY CAST(t.createdAt AS LocalDate) ASC
+        """)
+    List<Object[]> findDailyIssuanceByServiceType(
+            @Param("officeId") UUID officeId,
+            @Param("from") OffsetDateTime from);
+
+    /**
+     * Analytics: Token count grouped by hour-of-day (0–23) for an office.
+     * Returns Object[] rows: [hourOfDay (Integer), count (Long)]
+     */
+    @Query("""
+        SELECT EXTRACT(HOUR FROM t.createdAt), COUNT(t)
+        FROM Token t
+        WHERE t.officeId = :officeId
+          AND t.createdAt >= :from
+        GROUP BY EXTRACT(HOUR FROM t.createdAt)
+        ORDER BY EXTRACT(HOUR FROM t.createdAt) ASC
+        """)
+    List<Object[]> findHourlyTokenDistribution(
+            @Param("officeId") UUID officeId,
+            @Param("from") OffsetDateTime from);
 }

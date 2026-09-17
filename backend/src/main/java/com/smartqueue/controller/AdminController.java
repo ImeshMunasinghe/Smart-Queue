@@ -7,13 +7,14 @@ import com.smartqueue.repository.OfficeRepository;
 import com.smartqueue.repository.ServiceTimeLogRepository;
 import com.smartqueue.repository.ServiceTypeRepository;
 import com.smartqueue.repository.SlotCapacityRepository;
+import com.smartqueue.repository.TokenRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -24,15 +25,18 @@ public class AdminController {
     private final ServiceTypeRepository serviceTypeRepository;
     private final SlotCapacityRepository slotCapacityRepository;
     private final ServiceTimeLogRepository serviceTimeLogRepository;
+    private final TokenRepository tokenRepository;
 
     public AdminController(OfficeRepository officeRepository,
                            ServiceTypeRepository serviceTypeRepository,
                            SlotCapacityRepository slotCapacityRepository,
-                           ServiceTimeLogRepository serviceTimeLogRepository) {
+                           ServiceTimeLogRepository serviceTimeLogRepository,
+                           TokenRepository tokenRepository) {
         this.officeRepository = officeRepository;
         this.serviceTypeRepository = serviceTypeRepository;
         this.slotCapacityRepository = slotCapacityRepository;
         this.serviceTimeLogRepository = serviceTimeLogRepository;
+        this.tokenRepository = tokenRepository;
     }
 
     @GetMapping("/offices")
@@ -83,4 +87,66 @@ public class AdminController {
                 "slotsToday", slots
         ));
     }
+
+    /**
+     * GET /api/v1/admin/offices/{officeId}/analytics/daily-volume?days=7
+     *
+     * Returns daily token issuance counts grouped by service type for the last N days.
+     * Response: [ { date, serviceTypeId, serviceTypeName, count }, ... ]
+     */
+    @GetMapping("/offices/{officeId}/analytics/daily-volume")
+    public ResponseEntity<List<Map<String, Object>>> getDailyVolume(
+            @PathVariable UUID officeId,
+            @RequestParam(defaultValue = "7") int days) {
+
+        OffsetDateTime from = LocalDate.now().minusDays(days - 1)
+                .atStartOfDay().atOffset(ZoneOffset.UTC);
+
+        List<Object[]> rows = tokenRepository.findDailyIssuanceByServiceType(officeId, from);
+
+        // Build a serviceTypeId → name lookup map
+        Map<String, String> serviceNames = new HashMap<>();
+        serviceTypeRepository.findByOfficeIdAndActiveTrue(officeId)
+                .forEach(st -> serviceNames.put(st.getId().toString(), st.getName()));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("date", row[0] != null ? row[0].toString() : null);
+            entry.put("serviceTypeId", row[1] != null ? row[1].toString() : null);
+            entry.put("serviceTypeName",
+                    row[1] != null ? serviceNames.getOrDefault(row[1].toString(), "Unknown") : "Unknown");
+            entry.put("count", row[2]);
+            result.add(entry);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * GET /api/v1/admin/offices/{officeId}/analytics/hourly-wait?days=7
+     *
+     * Returns average service duration (seconds) grouped by hour of day (0–23) for the last N days.
+     * Response: [ { hour, avgDurationSeconds }, ... ]
+     */
+    @GetMapping("/offices/{officeId}/analytics/hourly-wait")
+    public ResponseEntity<List<Map<String, Object>>> getHourlyWait(
+            @PathVariable UUID officeId,
+            @RequestParam(defaultValue = "7") int days) {
+
+        OffsetDateTime from = LocalDate.now().minusDays(days - 1)
+                .atStartOfDay().atOffset(ZoneOffset.UTC);
+
+        List<Object[]> rows = serviceTimeLogRepository.findAvgDurationByHour(officeId, from);
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("hour", row[0] != null ? ((Number) row[0]).intValue() : null);
+            entry.put("avgDurationSeconds",
+                    row[1] != null ? Math.round(((Number) row[1]).doubleValue()) : 0);
+            result.add(entry);
+        }
+        return ResponseEntity.ok(result);
+    }
 }
+
