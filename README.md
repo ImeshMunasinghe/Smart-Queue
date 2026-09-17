@@ -80,13 +80,25 @@ flowchart TB
 - **Zero-Overselling Concurrency Defense**: Uses atomic conditional updates (`WHERE issued_count < max_limit`) to ensure zero slot overselling even under 1,000+ simultaneous requests.
 - **Dual NIC Format Support**: Validates and normalizes both legacy 9-digit with suffix (`145896235V`) and modern 12-digit (`144756235896`) formats via `^([0-9]{9}[vVxX]|[0-9]{12})$`.
 - **Desktop Ergonomics for Operators**: Counter station optimized for desktop PC monitors with keyboard hotkeys (<kbd>Space</kbd> Call Next, <kbd>S</kbd> Serve, <kbd>C</kbd> Complete, <kbd>K</kbd> Skip, <kbd>R</kbd> Recall, <kbd>X</kbd> No-Show) and Web Audio chimes.
-- **Full Token Lifecycle & Cancellation**: Formally handles `WAITING ➔ CANCELLED` and `CALLED ➔ CANCELLED`, immediately reclaiming slot capacity upon withdrawal.
+- **Full Token Lifecycle & Counter Release**: Handles full lifecycle transitions (`WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `SKIPPED`, `NO_SHOW`, `CANCELLED`), automatically resetting counters to `ONLINE` upon completion or absence.
+- **JWT Authentication & Role-Based Access Control**: Stateless Spring Security with HMAC-SHA256 JWTs protecting staff and admin consoles.
+- **Sliding-Window Rate Limiting**: Redis-backed defense protecting token issuance against spam (max 10 requests / 60 seconds per IP).
+- **Historical Telemetry Charts**: Interactive HTML5 Canvas charts displaying 7-day volume per service type and hourly duration with peak-hour bands.
 - **Probabilistic Overbooking Math**: Exact cumulative binomial tail probability model $\sum_{k=C+1}^{N} \binom{N}{k} p^k (1-p)^{N-k} \le \alpha$ ensures the risk of overcrowding stays under the configured policy (default 10%).
 - **Pluggable Zero-Cost SMS Sandbox**: Built-in test sandbox allows evaluating SMS commands (`STATUS <token>`, `CANCEL <token>`, `HELP`) and reviewing outbound logs with $0 telco cost.
 
 ---
 
 ## 🚀 Quick Start Guide
+
+### Pre-Seeded Staff Credentials
+
+| Role | Username | Password | Access Level |
+|---|---|---|---|
+| **Counter Operator** | `operator1` | `operator123` | Counter Desk (Call Next, Consultations) |
+| **System Administrator** | `admin` | `admin123` | Administration Console + Capacity Overrides + Counter Desk |
+
+---
 
 ### Option A: Run with Docker Compose (Recommended)
 

@@ -46,10 +46,13 @@
    - [8.3 Automated 3-Minute Timeout Sweeper](#83-automated-3-minute-timeout-sweeper)
    - [8.4 Idempotency Protection Against Duplicate Bookings](#84-idempotency-protection-against-duplicate-bookings)
    - [8.5 Comprehensive Audit Logging](#85-comprehensive-audit-logging)
+   - [8.6 Staff Authentication & Role-Based Access Control (RBAC)](#86-staff-authentication--role-based-access-control-rbac)
+   - [8.7 Sliding-Window Rate Limiting (HTTP 429 Defense)](#87-sliding-window-rate-limiting-http-429-defense)
 9. [Administrative Console & Capacity Control](#9-administrative-console--capacity-control)
    - [9.1 Session Windows & Daily Quotas](#91-session-windows--daily-quotas)
    - [9.2 Administrator Overbooking Ceiling Overrides](#92-administrator-overbooking-ceiling-overrides)
-   - [9.3 Real-Time Counter Fleet Monitoring](#93-real-time-counter-fleet-monitoring)
+   - [9.3 Real-Time Counter Fleet Monitoring & Automated Release](#93-real-time-counter-fleet-monitoring--automated-release)
+   - [9.4 Historical Telemetry Charts (Daily Volume & Hourly Duration)](#94-historical-telemetry-charts-daily-volume--hourly-duration)
 10. [Telco SMS Sandbox & Integration](#10-telco-sms-sandbox--integration)
     - [10.1 Pluggable SMS Gateway Provider Pattern](#101-pluggable-sms-gateway-provider-pattern)
     - [10.2 Zero-Cost In-Browser Testing Sandbox](#102-zero-cost-in-browser-testing-sandbox)
@@ -394,17 +397,23 @@ stateDiagram-v2
     
     SKIPPED --> CALLED : Operator Recalls Citizen
     SKIPPED --> NO_SHOW : Final Absence
+    SKIPPED --> CANCELLED : Citizen Cancels
     
-    SERVING --> COMPLETED : Service Finished (Logs Duration)
+    SERVING --> COMPLETED : Consultation Finished (Logs Service Duration)
+    SERVING --> NO_SHOW : Citizen Leaves Mid-Consultation
+    SERVING --> SKIPPED : Citizen Incomplete Docs / Stepped Aside
+    SERVING --> CANCELLED : Consultation Terminated
     
-    COMPLETED --> [*]
-    NO_SHOW --> [*]
-    CANCELLED --> [*]
+    COMPLETED --> [*] : Counter Reset to ONLINE
+    NO_SHOW --> [*] : Counter Reset to ONLINE
+    CANCELLED --> [*] : Counter Reset to ONLINE
 ```
+
+Enforced concurrently in Java (`TokenState.canTransitionTo`) and at the database tier via PostgreSQL trigger `trg_fn_enforce_token_state_transition()` ([Flyway `V2`](file:///d:/Smart%20Queue/backend/src/main/resources/db/migration/V2__update_token_state_transition_trigger.sql)).
 
 ### 8.3 Automated 3-Minute Timeout Sweeper
 * A background cron worker (`@Scheduled(fixedRate = 10000)`) inspects tokens remaining in the `CALLED` state.
-* If a citizen does not approach the counter within **3 minutes**, the sweeper automatically transitions the token to `NO_SHOW`, reclaims capacity, and enables the operator to proceed without stalling the line.
+* If a citizen does not approach the counter within **3 minutes**, the sweeper automatically transitions the token to `NO_SHOW`, reclaims slot capacity, frees the counter back to `ONLINE`, and enables the operator to proceed without stalling the line.
 
 ### 8.4 Idempotency Protection Against Duplicate Bookings
 * Every booking accepts an `Idempotency-Key` header.
@@ -417,6 +426,22 @@ stateDiagram-v2
   * `operator_id` (UUID of the staff member)
   * Precise timestamp with timezone.
 
+### 8.6 Staff Authentication & Role-Based Access Control (RBAC)
+Staff workstations and administration consoles are secured via Spring Security and HMAC-SHA256 signed JSON Web Tokens (JJWT 0.12.x):
+* **Stateless Session Tokens**: JWTs expire after 8 hours (`jwt.expiration-hours: 8`) and are validated on each request via `JwtAuthFilter`.
+* **Role Hierarchy**:
+  * `ROLE_OPERATOR`: Can access Counter Desk, call next citizen, and transition tickets (`serve`, `complete`, `skip`, `recall`, `no-show`).
+  * `ROLE_ADMIN`: Superuser authority. Inherits full operator capabilities plus manual capacity overrides, analytics telemetry, and office management.
+* **Pre-Seeded Demo Accounts**:
+  * **Operator**: `operator1` / `operator123` (`ROLE_OPERATOR`)
+  * **Admin**: `admin` / `admin123` (`ROLE_ADMIN`)
+
+### 8.7 Sliding-Window Rate Limiting (HTTP 429 Defense)
+A Redis-backed sliding-window rate limit filter (`RateLimitFilter`) intercepts public token issuance requests (`POST /api/v1/tokens`):
+* **Policy**: Max **10 requests per 60 seconds per client IP** (`rate:ip:<clientIp>`).
+* **Reverse-Proxy Aware**: Accurately resolves original client IPs through `X-Forwarded-For` proxy headers.
+* **Fail-Open Resilience**: If Redis becomes temporarily unreachable, the filter logs a warning and fails open to preserve civic service availability.
+
 ---
 
 ## 9. Administrative Console & Capacity Control
@@ -427,8 +452,19 @@ stateDiagram-v2
 ### 9.2 Administrator Overbooking Ceiling Overrides
 * For emergency days (e.g. special government registration drives), an administrator can set a `manual_override_limit`, superseding the algorithmic ceiling.
 
-### 9.3 Real-Time Counter Fleet Monitoring
-* Displays live operator presence: which counters are `ONLINE`, `BUSY`, `PAUSED`, or `OFFLINE`.
+### 9.3 Real-Time Counter Fleet Monitoring & Automated Release
+* Displays live operator presence: actively distinguishes `ONLINE` (idle/ready), `BUSY` (serving citizen), `PAUSED`, and `OFFLINE` workstations.
+* **Automatic Counter Release**: As soon as an operator completes a consultation or marks a no-show/skip, the counter is atomically set back to `ONLINE` and its active token pointer is cleared. Public displays and intake balancers immediately detect counter availability.
+* **Auto-Refresh Interval**: When logged in as staff, the console polls telemetry every 15 seconds to ensure queue statistics stay fresh without requiring manual page reloads.
+
+### 9.4 Historical Telemetry Charts (Daily Volume & Hourly Duration)
+Located in the administration dashboard:
+1. **Daily Token Volume (Stacked Bar Chart)**:
+   * Displays daily token issuance counts grouped by service type for the past 7, 14, or 30 days.
+   * Rendered with responsive HTML5 Canvas and distinct civic color accents.
+2. **Hourly Service Wait & Duration (Line Chart)**:
+   * Graphs average consultation duration (seconds) across hours of the day (8:00 AM – 5:00 PM).
+   * Highlights peak hours (09:00–11:00 and 13:00–15:00) with shaded reference bands to assist supervisors in staffing schedules.
 
 ---
 
@@ -527,6 +563,13 @@ This starts 4 synchronized services:
 | **SMS Sandbox** | `http://localhost:5173` *(SMS Gateway tab)* | Interactive test harness for SMS commands (`STATUS`, `CANCEL`) |
 | **Prediction API Docs** | `http://localhost:8000/docs` | Interactive Swagger UI for mathematical models |
 | **Backend Actuator Health** | `http://localhost:8080/actuator/health` | Spring Boot health check endpoint |
+
+#### Pre-Seeded Staff Credentials
+
+| Role | Username | Password | Granted Authority | Permitted Sections |
+|---|---|---|---|---|
+| **Counter Operator** | `operator1` | `operator123` | `ROLE_OPERATOR` | Counter Desk (Calling citizens, consultations) |
+| **System Administrator** | `admin` | `admin123` | `ROLE_ADMIN` | Administration (Capacity overrides, analytics) + Counter Desk |
 
 ---
 
